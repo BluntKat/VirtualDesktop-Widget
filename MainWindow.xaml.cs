@@ -9,6 +9,12 @@ namespace TaskbarWorkspaceWidget
 {
     public partial class MainWindow : Window
     {
+        //Constants for overriding win recogn of the widget
+        const int GWL_EXSTYLE = -20;
+        const int WS_EX_TOOLWINDOW = 0x00000080;
+        const int WS_EX_APPWINDOW = 0x00040000;
+
+        //Time dispatchers
         private DispatcherTimer _updateTimer;
         private DispatcherTimer _positionTimer;
 
@@ -16,6 +22,27 @@ namespace TaskbarWorkspaceWidget
         {
             InitializeComponent();
             PositionWindowNearTaskbar();
+        }
+
+        [DllImport("user32.dll")]
+        static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
+        [DllImport("user32.dll")]
+        static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+
+        protected override void OnSourceInitialized(EventArgs e)
+        {
+            base.OnSourceInitialized(e);
+
+            IntPtr handler = new WindowInteropHelper(this).Handle;
+            int exStyle = GetWindowLong(handler, GWL_EXSTYLE);
+
+            //Replace app window flag with tool window (this makes the tool not being shown on alt+tab)
+            exStyle &= ~WS_EX_APPWINDOW;
+            exStyle |= WS_EX_TOOLWINDOW;
+
+            SetWindowLong(handler, GWL_EXSTYLE, exStyle);
+
         }
 
         private void Window_Loaded(object sender, RoutedEventArgs e)
@@ -72,8 +99,11 @@ namespace TaskbarWorkspaceWidget
         private void PrevDesktop_Click(object sender, RoutedEventArgs e)
         {
             int current = VirtualDesktopInterop.GetCurrentDesktopNumber();
-            if (current > 1)
+            int total = VirtualDesktopInterop.GetDesktopCount();
+            if (current >= 1)
                 VirtualDesktopInterop.GoToDesktopNumber(current - 1);
+            else
+                VirtualDesktopInterop.GoToDesktopNumber(total -1);
         }
 
         private void NextDesktop_Click(object sender, RoutedEventArgs e)
@@ -82,6 +112,8 @@ namespace TaskbarWorkspaceWidget
             int total = VirtualDesktopInterop.GetDesktopCount();
             if (current < total)
                 VirtualDesktopInterop.GoToDesktopNumber(current + 1);
+            else
+                VirtualDesktopInterop.GoToDesktopNumber((total - current) + 1);
         }
 
         private void PositionWindowNearTaskbar()
