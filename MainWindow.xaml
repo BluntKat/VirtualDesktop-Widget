@@ -1,0 +1,29 @@
+﻿<Window x:Class="TaskbarWorkspaceWidget.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="WorkspaceWidget" Height="40" Width="200"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        Topmost="True" ShowInTaskbar="False"
+        ResizeMode="NoResize"
+        Loaded="Window_Loaded">
+
+    <Border Background="#AA222222" CornerRadius="6" Padding="8">
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+            <!-- Dot indicators -->
+            <TextBlock Name="WorkspaceIndicators"
+                       Foreground="White"
+                       FontSize="16"
+                       Text="● ○ ○ ○"
+                       Margin="0,0,10,0"
+                       VerticalAlignment="Center"/>
+            <!-- Prev button -->
+            <Button Content="◀"
+                    Click="PrevDesktop_Click"
+                    Margin="2,0,2,0"/>
+            <!-- Next button -->
+            <Button Content="▶"
+                    Click="NextDesktop_Click"
+                    Margin="2,0,2,0"/>
+        </StackPanel>
+    </Border>
+</Window>
