@@ -1,8 +1,9 @@
 ﻿using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Threading;
-using WindowsDesktop;
+using System.Windows.Input;
 
 
 namespace TaskbarWorkspaceWidget
@@ -22,6 +23,8 @@ namespace TaskbarWorkspaceWidget
         {
             InitializeComponent();
             PositionWindowNearTaskbar();
+            this.PreviewMouseWheel += MainWindow_PreviewMouseWheel;
+
         }
 
         [DllImport("user32.dll")]
@@ -63,7 +66,8 @@ namespace TaskbarWorkspaceWidget
             AdjustPosition();
             UpdateIndicators();
         }
-        private void AdjustPosition() {
+        private void AdjustPosition()
+        {
             var screenHeight = SystemParameters.PrimaryScreenHeight;
             var taskbarHeight = TaskbarHelper.GetTaskbarHeight();
             var autoHide = TaskbarHelper.IsTaskbarAutoHide();
@@ -98,22 +102,20 @@ namespace TaskbarWorkspaceWidget
 
         private void PrevDesktop_Click(object sender, RoutedEventArgs e)
         {
-            int current = VirtualDesktopInterop.GetCurrentDesktopNumber();
             int total = VirtualDesktopInterop.GetDesktopCount();
-            if (current >= 1)
-                VirtualDesktopInterop.GoToDesktopNumber(current - 1);
-            else
-                VirtualDesktopInterop.GoToDesktopNumber(total -1);
+            int current = VirtualDesktopInterop.GetCurrentDesktopNumber();
+
+            int target = (current - 1 + total) % total;
+            VirtualDesktopInterop.GoToDesktopNumber(target);
         }
 
         private void NextDesktop_Click(object sender, RoutedEventArgs e)
         {
-            int current = VirtualDesktopInterop.GetCurrentDesktopNumber();
             int total = VirtualDesktopInterop.GetDesktopCount();
-            if (current < total)
-                VirtualDesktopInterop.GoToDesktopNumber(current + 1);
-            else
-                VirtualDesktopInterop.GoToDesktopNumber((total - current) + 1);
+            int current = VirtualDesktopInterop.GetCurrentDesktopNumber();
+
+            int target = (current + 1) % total;
+            VirtualDesktopInterop.GoToDesktopNumber(target);
         }
 
         private void PositionWindowNearTaskbar()
@@ -144,88 +146,104 @@ namespace TaskbarWorkspaceWidget
                     break;
             }
         }
-    }
-
-    public static class TaskbarHelper
-    {
-        private const int ABM_GETSTATE = 4;
-        private const int ABS_AUTOHIDE = 1;
-
-        public enum TaskbarPosition
+        private void MainWindow_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
         {
-            Left, Top, Right, Bottom, Unknown
-        }
+            int total = VirtualDesktopInterop.GetDesktopCount();
+            int current = VirtualDesktopInterop.GetCurrentDesktopNumber();
 
-        [DllImport("shell32.dll")]
-        private static extern IntPtr SHAppBarMessage(uint dwMessage, ref APPBARDATA pData);
-
-        private const uint ABM_GETTASKBARPOS = 0x00000005;
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct RECT
-        {
-            public int left, top, right, bottom;
-        }
-        [StructLayout(LayoutKind.Sequential)]
-        private struct APPBARDATA
-        {
-            public uint cbSize;
-            public IntPtr hWnd;
-            public uint uCallbackMessage;
-            public uint uEdge;
-            public RECT rc;
-            public int lParam;
-        }
-
-        public static bool IsTaskbarAutoHide()
-        {
-            APPBARDATA abd = new APPBARDATA();
-            abd.cbSize = (uint) Marshal.SizeOf(abd);
-            int state = (int)SHAppBarMessage(ABM_GETSTATE, ref abd);
-            return (state & ABS_AUTOHIDE) == ABS_AUTOHIDE;
-        }
-
-
-        public static TaskbarPosition GetTaskbarPosition()
-        {
-            APPBARDATA data = new APPBARDATA();
-            data.cbSize = (uint)Marshal.SizeOf(typeof(APPBARDATA));
-            IntPtr result = SHAppBarMessage(ABM_GETTASKBARPOS, ref data);
-            if (result == IntPtr.Zero)
-                return TaskbarPosition.Unknown;
-
-            switch (data.uEdge)
+            if (e.Delta > 0) // Scroll up → previous
             {
-                case 0: return TaskbarPosition.Left;
-                case 1: return TaskbarPosition.Top;
-                case 2: return TaskbarPosition.Right;
-                case 3: return TaskbarPosition.Bottom;
-                default: return TaskbarPosition.Unknown;
+                int target = (current - 1 + total) % total;
+                VirtualDesktopInterop.GoToDesktopNumber(target);
+            }
+            else if (e.Delta < 0) // Scroll down → next
+            {
+                int target = (current + 1) % total;
+                VirtualDesktopInterop.GoToDesktopNumber(target);
             }
         }
 
-        public static double GetTaskbarHeight()
+        public static class TaskbarHelper
         {
-            APPBARDATA data = new APPBARDATA();
-            data.cbSize = (uint)Marshal.SizeOf(typeof(APPBARDATA));
-            IntPtr result = SHAppBarMessage(ABM_GETTASKBARPOS, ref data);
-            if (result == IntPtr.Zero)
-                return 40; // default guess
+            private const int ABM_GETSTATE = 4;
+            private const int ABS_AUTOHIDE = 1;
 
-            return Math.Abs(data.rc.bottom - data.rc.top);
+            public enum TaskbarPosition
+            {
+                Left, Top, Right, Bottom, Unknown
+            }
+
+            [DllImport("shell32.dll")]
+            private static extern IntPtr SHAppBarMessage(uint dwMessage, ref APPBARDATA pData);
+
+            private const uint ABM_GETTASKBARPOS = 0x00000005;
+
+            [StructLayout(LayoutKind.Sequential)]
+            private struct RECT
+            {
+                public int left, top, right, bottom;
+            }
+            [StructLayout(LayoutKind.Sequential)]
+            private struct APPBARDATA
+            {
+                public uint cbSize;
+                public IntPtr hWnd;
+                public uint uCallbackMessage;
+                public uint uEdge;
+                public RECT rc;
+                public int lParam;
+            }
+
+            public static bool IsTaskbarAutoHide()
+            {
+                APPBARDATA abd = new APPBARDATA();
+                abd.cbSize = (uint)Marshal.SizeOf(abd);
+                int state = (int)SHAppBarMessage(ABM_GETSTATE, ref abd);
+                return (state & ABS_AUTOHIDE) == ABS_AUTOHIDE;
+            }
+
+
+            public static TaskbarPosition GetTaskbarPosition()
+            {
+                APPBARDATA data = new APPBARDATA();
+                data.cbSize = (uint)Marshal.SizeOf(typeof(APPBARDATA));
+                IntPtr result = SHAppBarMessage(ABM_GETTASKBARPOS, ref data);
+                if (result == IntPtr.Zero)
+                    return TaskbarPosition.Unknown;
+
+                switch (data.uEdge)
+                {
+                    case 0: return TaskbarPosition.Left;
+                    case 1: return TaskbarPosition.Top;
+                    case 2: return TaskbarPosition.Right;
+                    case 3: return TaskbarPosition.Bottom;
+                    default: return TaskbarPosition.Unknown;
+                }
+            }
+
+            public static double GetTaskbarHeight()
+            {
+                APPBARDATA data = new APPBARDATA();
+                data.cbSize = (uint)Marshal.SizeOf(typeof(APPBARDATA));
+                IntPtr result = SHAppBarMessage(ABM_GETTASKBARPOS, ref data);
+                if (result == IntPtr.Zero)
+                    return 40; // default guess
+
+                return Math.Abs(data.rc.bottom - data.rc.top);
+            }
+
+            public static double GetTaskbarWidth()
+            {
+                APPBARDATA data = new APPBARDATA();
+                data.cbSize = (uint)Marshal.SizeOf(typeof(APPBARDATA));
+                IntPtr result = SHAppBarMessage(ABM_GETTASKBARPOS, ref data);
+                if (result == IntPtr.Zero)
+                    return 40; // default guess
+
+                return Math.Abs(data.rc.right - data.rc.left);
+            }
         }
 
-        public static double GetTaskbarWidth()
-        {
-            APPBARDATA data = new APPBARDATA();
-            data.cbSize = (uint)Marshal.SizeOf(typeof(APPBARDATA));
-            IntPtr result = SHAppBarMessage(ABM_GETTASKBARPOS, ref data);
-            if (result == IntPtr.Zero)
-                return 40; // default guess
 
-            return Math.Abs(data.rc.right - data.rc.left);
-        }
     }
-
-   
 }
