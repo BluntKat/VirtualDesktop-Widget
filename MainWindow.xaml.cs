@@ -1,9 +1,9 @@
 ﻿using System.Runtime.InteropServices;
+using System.Text;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Threading;
-using System.Windows.Input;
 
 
 namespace TaskbarWorkspaceWidget
@@ -14,18 +14,58 @@ namespace TaskbarWorkspaceWidget
         const int GWL_EXSTYLE = -20;
         const int WS_EX_TOOLWINDOW = 0x00000080;
         const int WS_EX_APPWINDOW = 0x00040000;
-
+        // Those are for attaching to taskbar
+        private const uint EVENT_OBJECT_LOCATIONCHANGE = 0x800B;
+        private const uint WINEVENT_OUTOFCONTEXT = 0;
         //Time dispatchers
         private DispatcherTimer _updateTimer;
         private DispatcherTimer _positionTimer;
+        private DispatcherTimer _windowTitleTimer;
 
         public MainWindow()
         {
             InitializeComponent();
             PositionWindowNearTaskbar();
+            StartWindowTitleUpdates();
+            SnapToTaskbar();
             this.PreviewMouseWheel += MainWindow_PreviewMouseWheel;
-
         }
+
+        //Some structs
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RECT
+        {
+            public int Left;
+            public int Top;
+            public int Right;
+            public int Bottom;
+        }
+        //Focused window handling
+        [DllImport("user32.dll")]
+        static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+        
+        //Attach to taskbar
+        [DllImport("user32.dll", SetLastError = true)]
+        static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+
+        [DllImport("user32.dll")]
+        static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr SetWinEventHook(
+            uint eventMin, uint eventMax,
+            IntPtr hmodWinEventProc, WinEventDelegate lpfnWinEventProc,
+            uint idProcess, uint idThread, uint dwFlags);
+
+        [DllImport("user32.dll")]
+        private static extern bool UnhookWinEvent(IntPtr hWinEventHook);
+
+        private delegate void WinEventDelegate(IntPtr hWinEventHook, uint eventType,
+            IntPtr hwnd, int idObject, int idChild, uint dwEventThread, uint dwmsEventTime);
+
 
         [DllImport("user32.dll")]
         static extern int GetWindowLong(IntPtr hWnd, int nIndex);
@@ -33,6 +73,36 @@ namespace TaskbarWorkspaceWidget
         [DllImport("user32.dll")]
         static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
 
+        private IntPtr _taskbarHook;
+        private WinEventDelegate _taskbarEventDelegate;
+
+        private void HookTaskbar()
+        {
+            _taskbarEventDelegate = new WinEventDelegate(TaskbarChanged);
+            _taskbarHook = SetWinEventHook(
+                EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE,
+                IntPtr.Zero, _taskbarEventDelegate, 0, 0, WINEVENT_OUTOFCONTEXT);
+        }
+
+        private void UnhookTaskbar()
+        {
+            if (_taskbarHook != IntPtr.Zero)
+            {
+                UnhookWinEvent(_taskbarHook);
+                _taskbarHook = IntPtr.Zero;
+            }
+        }
+
+        private void TaskbarChanged(IntPtr hWinEventHook, uint eventType,
+            IntPtr hwnd, int idObject, int idChild, uint dwEventThread, uint dwmsEventTime)
+        {
+            // React only to Shell_TrayWnd moves/resizes
+            IntPtr taskbarHandle = FindWindow("Shell_TrayWnd", null);
+            if (hwnd == taskbarHandle)
+            {
+                Dispatcher.Invoke(SnapToTaskbar);
+            }
+        }
         protected override void OnSourceInitialized(EventArgs e)
         {
             base.OnSourceInitialized(e);
@@ -65,6 +135,9 @@ namespace TaskbarWorkspaceWidget
 
             AdjustPosition();
             UpdateIndicators();
+            HookTaskbar();
+            SnapToTaskbar();
+            StartWindowTitleUpdates();
         }
         private void AdjustPosition()
         {
@@ -162,6 +235,86 @@ namespace TaskbarWorkspaceWidget
                 VirtualDesktopInterop.GoToDesktopNumber(target);
             }
         }
+        private void StartWindowTitleUpdates()
+        {
+            _windowTitleTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(500)
+            };
+            _windowTitleTimer.Tick += (s, e) =>
+            {
+                var title = GetActiveWindowTitle();
+                ActiveWindowTitle.Text = string.IsNullOrEmpty(title) ? "" : title;
+            };
+            _windowTitleTimer.Start();
+        }
+
+        private string GetActiveWindowTitle()
+        {
+            const int nChars = 256;
+            StringBuilder Buff = new StringBuilder(nChars);
+            IntPtr handle = GetForegroundWindow();
+
+            if (GetWindowText(handle, Buff, nChars) > 0)
+            {
+                return Buff.ToString();
+            }
+            return string.Empty;
+        }
+
+        //Opacity handlers
+        private void Window_MouseEnter(object sender, MouseEventArgs e)
+        {
+            this.Opacity = 1.0;
+        }
+
+        private void Window_MouseLeave(object sender, MouseEventArgs e)
+        {
+            this.Opacity = 0.4;
+        }
+
+        //Attach to taskbar method
+        private void SnapToTaskbar()
+        {
+            // Taskbar handle
+            IntPtr taskbarHandle = FindWindow("Shell_TrayWnd", null);
+            if (taskbarHandle == IntPtr.Zero)
+                return;
+
+            if (!GetWindowRect(taskbarHandle, out RECT rect))
+                return;
+
+            double screenWidth = SystemParameters.PrimaryScreenWidth;
+            double screenHeight = SystemParameters.PrimaryScreenHeight;
+
+            // Determine taskbar position
+            bool isBottom = rect.Top > screenHeight / 2;
+            bool isTop = rect.Bottom < screenHeight / 2;
+            bool isLeft = rect.Right < screenWidth / 2;
+            bool isRight = rect.Left > screenWidth / 2;
+
+            if (isBottom)
+            {
+                this.Left = rect.Left + (rect.Right - rect.Left - this.Width) / 2;
+                this.Top = rect.Top - this.Height - 5;
+            }
+            else if (isTop)
+            {
+                this.Left = rect.Left + (rect.Right - rect.Left - this.Width) / 2;
+                this.Top = rect.Bottom + 5;
+            }
+            else if (isLeft)
+            {
+                this.Left = rect.Right + 5;
+                this.Top = rect.Top + (rect.Bottom - rect.Top - this.Height) / 2;
+            }
+            else if (isRight)
+            {
+                this.Left = rect.Left - this.Width - 5;
+                this.Top = rect.Top + (rect.Bottom - rect.Top - this.Height) / 2;
+            }
+        }
+   
 
         public static class TaskbarHelper
         {
